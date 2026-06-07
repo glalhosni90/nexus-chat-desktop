@@ -3,18 +3,20 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+const crypto = require('crypto');
 const db = require('./database');
 
 let server = null;
 let io = null;
 
-const onlineUsers = new Map(); // username -> { socketId, displayName, avatarColor }
+const onlineUsers = new Map(); // userId -> socketId
+
+function hashPassword(pw) {
+  return crypto.createHash('sha256').update(pw).digest('hex');
+}
 
 async function startServer(port) {
-  // Initialize database first
   await db.initDatabase();
-
-  // Use provided port, or PORT env, or 3001
   const listenPort = port || process.env.PORT || 3001;
 
   return new Promise((resolve, reject) => {
@@ -22,32 +24,78 @@ async function startServer(port) {
     app.use(cors());
     app.use(express.json());
 
-    // Serve static frontend in production
+    // Serve static frontend
     const buildPath = path.join(__dirname, '..', 'renderer', 'build');
     app.use(express.static(buildPath));
 
-    // Health check
-    app.get('/health', (req, res) => {
-      res.json({ status: 'ok', app: 'NexusChat Desktop' });
+    // --- AUTH ---
+    app.post('/api/register', (req, res) => {
+      const { username, displayName, password, avatarColor } = req.body;
+      if (!username || !displayName || !password) {
+        return res.status(400).json({ error: 'All fields required' });
+      }
+      if (username.length < 3 || username.length > 20) {
+        return res.status(400).json({ error: 'Username must be 3-20 characters' });
+      }
+      const user = db.createUser(username, displayName, hashPassword(password), avatarColor);
+      if (!user) return res.status(409).json({ error: 'Username already taken' });
+      res.json({ user });
     });
 
-    // Get all messages for a room
-    app.get('/api/messages', (req, res) => {
-      const limit = parseInt(req.query.limit) || 100;
-      const messages = db.getMessages(limit);
+    app.post('/api/login', (req, res) => {
+      const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ error: 'Username and password required' });
+      }
+      const user = db.getUserByUsername(username);
+      if (!user || user.password !== hashPassword(password)) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+      res.json({
+        user: { id: user.id, username: user.username, displayName: user.display_name, avatarColor: user.avatar_color }
+      });
+    });
+
+    // --- USERS ---
+    app.get('/api/users/search', (req, res) => {
+      const { q } = req.query;
+      if (!q || q.length < 1) return res.json([]);
+      const results = db.searchUsers(q);
+      res.json(results);
+    });
+
+    // --- CONTACTS ---
+    app.get('/api/contacts/:userId', (req, res) => {
+      const contacts = db.getContacts(req.params.userId);
+      res.json(contacts);
+    });
+
+    app.post('/api/contacts/add', (req, res) => {
+      const { userId, contactId } = req.body;
+      if (!userId || !contactId) return res.status(400).json({ error: 'Missing fields' });
+      if (userId === contactId) return res.status(400).json({ error: 'Cannot add yourself' });
+      const success = db.addContact(userId, contactId);
+      if (!success) return res.status(409).json({ error: 'Already a contact' });
+      res.json({ success: true });
+    });
+
+    // --- MESSAGES ---
+    app.get('/api/messages/:userId/:contactId', (req, res) => {
+      const { userId, contactId } = req.params;
+      const messages = db.getConversation(userId, contactId);
+      db.markAsRead(contactId, userId);
       res.json(messages);
     });
 
-    // Get online users
-    app.get('/api/users/online', (req, res) => {
-      const users = [];
-      onlineUsers.forEach((info, username) => {
-        users.push({ username, displayName: info.displayName, avatarColor: info.avatarColor });
-      });
-      res.json(users);
+    app.get('/api/messages/unread/:userId', (req, res) => {
+      const counts = db.getUnreadCounts(req.params.userId);
+      res.json(counts);
     });
 
-    // Fallback to index.html for SPA routing
+    // Health
+    app.get('/health', (req, res) => res.json({ status: 'ok' }));
+
+    // SPA fallback
     app.get('*', (req, res) => {
       const indexPath = path.join(buildPath, 'index.html');
       if (require('fs').existsSync(indexPath)) {
@@ -58,62 +106,61 @@ async function startServer(port) {
     });
 
     server = http.createServer(app);
-    io = new Server(server, {
-      cors: { origin: '*', methods: ['GET', 'POST'] }
-    });
+    io = new Server(server, { cors: { origin: '*', methods: ['GET', 'POST'] } });
 
     io.on('connection', (socket) => {
-      console.log('Client connected:', socket.id);
-
-      // User joins
-      socket.on('user:join', ({ username, displayName, avatarColor }) => {
-        socket.username = username;
-        socket.displayName = displayName;
-        socket.avatarColor = avatarColor;
-
-        onlineUsers.set(username, { socketId: socket.id, displayName, avatarColor });
-
-        // Broadcast user joined
-        io.emit('user:joined', { username, displayName, avatarColor });
-        io.emit('users:online', getOnlineUsersList());
+      // User goes online
+      socket.on('user:online', (userId) => {
+        socket.userId = userId;
+        onlineUsers.set(userId, socket.id);
+        db.updateUserStatus(userId, 'online');
+        io.emit('user:status', { userId, status: 'online' });
       });
 
-      // Message send
-      socket.on('message:send', ({ content, type }) => {
-        if (!socket.username) return;
-
-        const message = db.saveMessage({
-          username: socket.username,
-          displayName: socket.displayName,
-          avatarColor: socket.avatarColor,
-          content,
-          type: type || 'text',
-        });
-
-        // Broadcast to all
-        io.emit('message:new', message);
+      // Private message
+      socket.on('message:send', ({ toUserId, content, type }) => {
+        if (!socket.userId) return;
+        const message = db.saveMessage(socket.userId, toUserId, content, type);
+        // Send to recipient if online
+        const recipientSocket = onlineUsers.get(toUserId);
+        if (recipientSocket) {
+          io.to(recipientSocket).emit('message:receive', message);
+        }
+        // Confirm to sender
+        socket.emit('message:sent', message);
       });
 
-      // Typing indicators
-      socket.on('typing:start', () => {
-        if (!socket.username) return;
-        socket.broadcast.emit('typing:start', {
-          username: socket.username,
-          displayName: socket.displayName,
-        });
+      // Typing
+      socket.on('typing:start', ({ toUserId }) => {
+        const recipientSocket = onlineUsers.get(toUserId);
+        if (recipientSocket) {
+          io.to(recipientSocket).emit('typing:start', { fromUserId: socket.userId });
+        }
       });
 
-      socket.on('typing:stop', () => {
-        if (!socket.username) return;
-        socket.broadcast.emit('typing:stop', { username: socket.username });
+      socket.on('typing:stop', ({ toUserId }) => {
+        const recipientSocket = onlineUsers.get(toUserId);
+        if (recipientSocket) {
+          io.to(recipientSocket).emit('typing:stop', { fromUserId: socket.userId });
+        }
+      });
+
+      // Mark messages as read
+      socket.on('messages:read', ({ fromUserId }) => {
+        if (!socket.userId) return;
+        db.markAsRead(fromUserId, socket.userId);
+        const senderSocket = onlineUsers.get(fromUserId);
+        if (senderSocket) {
+          io.to(senderSocket).emit('messages:read', { byUserId: socket.userId });
+        }
       });
 
       // Disconnect
       socket.on('disconnect', () => {
-        if (socket.username) {
-          onlineUsers.delete(socket.username);
-          io.emit('user:left', { username: socket.username, displayName: socket.displayName });
-          io.emit('users:online', getOnlineUsersList());
+        if (socket.userId) {
+          onlineUsers.delete(socket.userId);
+          db.updateUserStatus(socket.userId, 'offline');
+          io.emit('user:status', { userId: socket.userId, status: 'offline' });
         }
       });
     });
@@ -128,21 +175,12 @@ async function startServer(port) {
   });
 }
 
-function getOnlineUsersList() {
-  const users = [];
-  onlineUsers.forEach((info, username) => {
-    users.push({ username, displayName: info.displayName, avatarColor: info.avatarColor });
-  });
-  return users;
-}
-
 function stopServer() {
   if (io) io.close();
   if (server) server.close();
   db.close();
 }
 
-// Allow running standalone (not just from Electron)
 if (require.main === module) {
   startServer().then(info => {
     console.log(`Server started on port ${info.port}`);

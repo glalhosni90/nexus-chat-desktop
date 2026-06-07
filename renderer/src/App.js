@@ -1,119 +1,169 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
-import SetupScreen from './components/SetupScreen';
-import ChatScreen from './components/ChatScreen';
+import AuthScreen from './components/AuthScreen';
+import Sidebar from './components/Sidebar';
+import ChatView from './components/ChatView';
+import SearchModal from './components/SearchModal';
 import './App.css';
 
-function App() {
-  const [connected, setConnected] = useState(false);
-  const [socket, setSocket] = useState(null);
-  const [user, setUser] = useState(null);
-  const [serverUrl, setServerUrl] = useState('');
-  const [messages, setMessages] = useState([]);
-  const [onlineUsers, setOnlineUsers] = useState([]);
-  const [typingUsers, setTypingUsers] = useState([]);
-  const [error, setError] = useState('');
+const SERVER_URL = window.location.origin;
 
-  const connectToServer = (url, username, displayName, avatarColor) => {
-    setError('');
-    const newSocket = io(url, {
-      transports: ['websocket', 'polling'],
-      timeout: 5000,
-    });
+function App() {
+  const [user, setUser] = useState(() => {
+    const saved = localStorage.getItem('nexuschat_user');
+    return saved ? JSON.parse(saved) : null;
+  });
+  const [socket, setSocket] = useState(null);
+  const [contacts, setContacts] = useState([]);
+  const [activeChat, setActiveChat] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [unreadCounts, setUnreadCounts] = useState({});
+  const [onlineStatuses, setOnlineStatuses] = useState({});
+  const [typingUsers, setTypingUsers] = useState({});
+  const [showSearch, setShowSearch] = useState(false);
+
+  // Connect socket when user logs in
+  useEffect(() => {
+    if (!user) return;
+
+    const newSocket = io(SERVER_URL, { transports: ['websocket', 'polling'] });
 
     newSocket.on('connect', () => {
-      setConnected(true);
-      setSocket(newSocket);
-      setServerUrl(url);
-      setUser({ username, displayName, avatarColor });
-
-      newSocket.emit('user:join', { username, displayName, avatarColor });
-
-      // Fetch existing messages
-      fetch(`${url}/api/messages`)
-        .then(r => r.json())
-        .then(msgs => setMessages(msgs))
-        .catch(() => {});
+      newSocket.emit('user:online', user.id);
     });
 
-    newSocket.on('connect_error', (err) => {
-      setError('فشل الاتصال بالسيرفر. تأكد من العنوان.');
-      newSocket.disconnect();
+    newSocket.on('message:receive', (msg) => {
+      setMessages(prev => {
+        if (prev.length > 0 && (prev[0].fromUserId === msg.fromUserId || prev[0].toUserId === msg.fromUserId)) {
+          return [...prev, msg];
+        }
+        return prev;
+      });
+      setUnreadCounts(prev => ({
+        ...prev,
+        [msg.fromUserId]: (prev[msg.fromUserId] || 0) + 1
+      }));
+      loadContacts();
     });
 
-    newSocket.on('message:new', (msg) => {
+    newSocket.on('message:sent', (msg) => {
       setMessages(prev => [...prev, msg]);
     });
 
-    newSocket.on('users:online', (users) => {
-      setOnlineUsers(users);
+    newSocket.on('user:status', ({ userId, status }) => {
+      setOnlineStatuses(prev => ({ ...prev, [userId]: status }));
     });
 
-    newSocket.on('user:joined', (userData) => {
-      // Could show notification
+    newSocket.on('typing:start', ({ fromUserId }) => {
+      setTypingUsers(prev => ({ ...prev, [fromUserId]: true }));
     });
 
-    newSocket.on('user:left', (userData) => {
-      setTypingUsers(prev => prev.filter(u => u.username !== userData.username));
+    newSocket.on('typing:stop', ({ fromUserId }) => {
+      setTypingUsers(prev => ({ ...prev, [fromUserId]: false }));
     });
 
-    newSocket.on('typing:start', ({ username, displayName }) => {
-      setTypingUsers(prev => {
-        if (prev.find(u => u.username === username)) return prev;
-        return [...prev, { username, displayName }];
-      });
+    newSocket.on('messages:read', ({ byUserId }) => {
+      // Messages were read by the other user
     });
 
-    newSocket.on('typing:stop', ({ username }) => {
-      setTypingUsers(prev => prev.filter(u => u.username !== username));
-    });
+    setSocket(newSocket);
+    loadContacts();
+    loadUnread();
 
-    newSocket.on('disconnect', () => {
-      setConnected(false);
-    });
-  };
+    return () => {
+      newSocket.disconnect();
+    };
+  }, [user]);
 
-  const disconnect = () => {
-    if (socket) {
-      socket.disconnect();
-      setSocket(null);
-      setConnected(false);
-      setMessages([]);
-      setOnlineUsers([]);
-      setTypingUsers([]);
-    }
+  const loadContacts = useCallback(async () => {
+    if (!user) return;
+    const res = await fetch(`${SERVER_URL}/api/contacts/${user.id}`);
+    const data = await res.json();
+    setContacts(data);
+  }, [user]);
+
+  const loadUnread = useCallback(async () => {
+    if (!user) return;
+    const res = await fetch(`${SERVER_URL}/api/messages/unread/${user.id}`);
+    const data = await res.json();
+    setUnreadCounts(data);
+  }, [user]);
+
+  const openChat = async (contact) => {
+    setActiveChat(contact);
+    const res = await fetch(`${SERVER_URL}/api/messages/${user.id}/${contact.id}`);
+    const data = await res.json();
+    setMessages(data);
+    // Clear unread for this contact
+    setUnreadCounts(prev => ({ ...prev, [contact.id]: 0 }));
+    if (socket) socket.emit('messages:read', { fromUserId: contact.id });
   };
 
   const sendMessage = (content) => {
-    if (socket && content.trim()) {
-      socket.emit('message:send', { content, type: 'text' });
-    }
+    if (!socket || !activeChat || !content.trim()) return;
+    socket.emit('message:send', { toUserId: activeChat.id, content, type: 'text' });
   };
 
-  const startTyping = () => {
-    if (socket) socket.emit('typing:start');
+  const handleLogin = (userData) => {
+    localStorage.setItem('nexuschat_user', JSON.stringify(userData));
+    setUser(userData);
   };
 
-  const stopTyping = () => {
-    if (socket) socket.emit('typing:stop');
+  const handleLogout = () => {
+    localStorage.removeItem('nexuschat_user');
+    if (socket) socket.disconnect();
+    setUser(null);
+    setSocket(null);
+    setContacts([]);
+    setMessages([]);
+    setActiveChat(null);
   };
 
-  if (!connected) {
-    return <SetupScreen onConnect={connectToServer} error={error} />;
+  const handleAddContact = async (contactId) => {
+    await fetch(`${SERVER_URL}/api/contacts/add`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: user.id, contactId })
+    });
+    loadContacts();
+    setShowSearch(false);
+  };
+
+  if (!user) {
+    return <AuthScreen onLogin={handleLogin} serverUrl={SERVER_URL} />;
   }
 
   return (
-    <ChatScreen
-      user={user}
-      messages={messages}
-      onlineUsers={onlineUsers}
-      typingUsers={typingUsers}
-      onSendMessage={sendMessage}
-      onStartTyping={startTyping}
-      onStopTyping={stopTyping}
-      onDisconnect={disconnect}
-      serverUrl={serverUrl}
-    />
+    <div className="app-layout">
+      <Sidebar
+        user={user}
+        contacts={contacts}
+        activeChat={activeChat}
+        unreadCounts={unreadCounts}
+        onlineStatuses={onlineStatuses}
+        onSelectChat={openChat}
+        onShowSearch={() => setShowSearch(true)}
+        onLogout={handleLogout}
+      />
+      <ChatView
+        user={user}
+        activeChat={activeChat}
+        messages={messages}
+        socket={socket}
+        isTyping={activeChat ? typingUsers[activeChat.id] : false}
+        isOnline={activeChat ? onlineStatuses[activeChat.id] === 'online' : false}
+        onSendMessage={sendMessage}
+      />
+      {showSearch && (
+        <SearchModal
+          serverUrl={SERVER_URL}
+          currentUserId={user.id}
+          contacts={contacts}
+          onAdd={handleAddContact}
+          onClose={() => setShowSearch(false)}
+        />
+      )}
+    </div>
   );
 }
 
