@@ -86,18 +86,23 @@ function CallModal({ user, activeChat, socket, callState, onClose }) {
   }, [socket, peerId]);
 
   const getMediaStream = async () => {
+    const audioConstraints = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true
+    };
     // Try with requested media first
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: isVideo
+        audio: audioConstraints,
+        video: isVideo ? { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } : false
       });
       return stream;
     } catch (err) {
       // If video failed, try audio only as fallback
       if (isVideo) {
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false });
           setErrorMsg('Camera unavailable, audio only');
           return stream;
         } catch (audioErr) {

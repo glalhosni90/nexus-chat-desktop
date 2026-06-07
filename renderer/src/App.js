@@ -221,7 +221,7 @@ function App() {
   }
 
   return (
-    <div className="app-layout">
+    <div className={`app-layout ${activeChat ? 'chat-open' : ''}`}>
       <Sidebar
         user={user}
         contacts={contacts}
@@ -243,6 +243,7 @@ function App() {
         onSendMessage={sendMessage}
         onUploadFile={handleUploadFile}
         onCall={handleCall}
+        onBack={() => setActiveChat(null)}
       />
       {showSearch && (
         <SearchModal
