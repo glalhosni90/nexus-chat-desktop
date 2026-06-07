@@ -10,7 +10,10 @@ let io = null;
 
 const onlineUsers = new Map(); // username -> { socketId, displayName, avatarColor }
 
-function startServer(port = 0) {
+async function startServer(port = 0) {
+  // Initialize database first
+  await db.initDatabase();
+
   return new Promise((resolve, reject) => {
     const app = express();
     app.use(cors());
