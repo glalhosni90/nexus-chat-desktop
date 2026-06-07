@@ -1,0 +1,7 @@
+node_modules/
+dist/
+renderer/build/
+renderer/node_modules/
+nexuschat.db
+*.exe
+.env

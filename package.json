@@ -1,0 +1,52 @@
+{
+  "name": "nexus-chat-desktop",
+  "version": "1.0.0",
+  "description": "NexusChat Desktop - Standalone LAN chat application",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "concurrently \"npm run react-dev\" \"wait-on http://localhost:3000 && electron .\"",
+    "react-dev": "cd renderer && npm start",
+    "build-react": "cd renderer && npm run build",
+    "build": "npm run build-react && electron-builder",
+    "build:win": "npm run build-react && electron-builder --win",
+    "pack": "npm run build-react && electron-builder --dir"
+  },
+  "build": {
+    "appId": "com.nexuschat.desktop",
+    "productName": "NexusChat",
+    "files": [
+      "main.js",
+      "preload.js",
+      "server/**/*",
+      "renderer/build/**/*",
+      "node_modules/**/*"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.4.3",
+    "cors": "^2.8.5",
+    "electron-store": "^8.1.0",
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "socket.io-client": "^4.7.2",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "electron": "^28.1.0",
+    "electron-builder": "^24.9.1",
+    "wait-on": "^7.2.0"
+  }
+}

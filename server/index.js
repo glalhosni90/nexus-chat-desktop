@@ -1,0 +1,126 @@
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const cors = require('cors');
+const path = require('path');
+const db = require('./database');
+
+let server = null;
+let io = null;
+
+const onlineUsers = new Map(); // username -> { socketId, displayName, avatarColor }
+
+function startServer(port = 0) {
+  return new Promise((resolve, reject) => {
+    const app = express();
+    app.use(cors());
+    app.use(express.json());
+
+    // Health check
+    app.get('/health', (req, res) => {
+      res.json({ status: 'ok', app: 'NexusChat Desktop' });
+    });
+
+    // Get all messages for a room
+    app.get('/api/messages', (req, res) => {
+      const limit = parseInt(req.query.limit) || 100;
+      const messages = db.getMessages(limit);
+      res.json(messages);
+    });
+
+    // Get online users
+    app.get('/api/users/online', (req, res) => {
+      const users = [];
+      onlineUsers.forEach((info, username) => {
+        users.push({ username, displayName: info.displayName, avatarColor: info.avatarColor });
+      });
+      res.json(users);
+    });
+
+    server = http.createServer(app);
+    io = new Server(server, {
+      cors: { origin: '*', methods: ['GET', 'POST'] }
+    });
+
+    io.on('connection', (socket) => {
+      console.log('Client connected:', socket.id);
+
+      // User joins
+      socket.on('user:join', ({ username, displayName, avatarColor }) => {
+        socket.username = username;
+        socket.displayName = displayName;
+        socket.avatarColor = avatarColor;
+
+        onlineUsers.set(username, { socketId: socket.id, displayName, avatarColor });
+
+        // Broadcast user joined
+        io.emit('user:joined', { username, displayName, avatarColor });
+        io.emit('users:online', getOnlineUsersList());
+      });
+
+      // Message send
+      socket.on('message:send', ({ content, type }) => {
+        if (!socket.username) return;
+
+        const message = db.saveMessage({
+          username: socket.username,
+          displayName: socket.displayName,
+          avatarColor: socket.avatarColor,
+          content,
+          type: type || 'text',
+        });
+
+        // Broadcast to all
+        io.emit('message:new', message);
+      });
+
+      // Typing indicators
+      socket.on('typing:start', () => {
+        if (!socket.username) return;
+        socket.broadcast.emit('typing:start', {
+          username: socket.username,
+          displayName: socket.displayName,
+        });
+      });
+
+      socket.on('typing:stop', () => {
+        if (!socket.username) return;
+        socket.broadcast.emit('typing:stop', { username: socket.username });
+      });
+
+      // Disconnect
+      socket.on('disconnect', () => {
+        if (socket.username) {
+          onlineUsers.delete(socket.username);
+          io.emit('user:left', { username: socket.username, displayName: socket.displayName });
+          io.emit('users:online', getOnlineUsersList());
+        }
+      });
+    });
+
+    // Use port 0 to let OS pick an available port
+    server.listen(port, '0.0.0.0', () => {
+      const addr = server.address();
+      console.log(`NexusChat server running on port ${addr.port}`);
+      resolve({ port: addr.port, host: '0.0.0.0' });
+    });
+
+    server.on('error', reject);
+  });
+}
+
+function getOnlineUsersList() {
+  const users = [];
+  onlineUsers.forEach((info, username) => {
+    users.push({ username, displayName: info.displayName, avatarColor: info.avatarColor });
+  });
+  return users;
+}
+
+function stopServer() {
+  if (io) io.close();
+  if (server) server.close();
+  db.close();
+}
+
+module.exports = { startServer, stopServer };
