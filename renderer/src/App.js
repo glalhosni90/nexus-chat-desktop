@@ -79,6 +79,10 @@ function App() {
 
     newSocket.on('messages:read', ({ byUserId }) => {});
 
+    newSocket.on('contacts:updated', () => {
+      loadContactsFn(userRef.current);
+    });
+
     setSocket(newSocket);
     loadContactsFn(user);
     loadUnreadFn(user);
@@ -118,9 +122,9 @@ function App() {
     if (socket) socket.emit('messages:read', { fromUserId: contact.id });
   };
 
-  const sendMessage = (content, type = 'text') => {
+  const sendMessage = (content, type = 'text', replyTo = null) => {
     if (!socket || !activeChat || !content.trim()) return;
-    socket.emit('message:send', { toUserId: activeChat.id, content, type });
+    socket.emit('message:send', { toUserId: activeChat.id, content, type, replyTo });
   };
 
   const handleLogin = (userData) => {

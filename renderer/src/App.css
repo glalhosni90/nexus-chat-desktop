@@ -754,6 +754,180 @@ body {
 .file-name { font-size: 13px; font-weight: 500; }
 .file-size { font-size: 11px; color: var(--text-muted); }
 
+/* Reply button on messages */
+.reply-btn {
+  position: absolute;
+  top: 4px;
+  right: -28px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.message:hover .reply-btn { opacity: 1; }
+.reply-btn:hover { color: var(--accent); background: var(--accent-light); }
+
+.message.own .reply-btn { right: auto; left: -28px; }
+
+/* Reply preview in message */
+.reply-preview {
+  display: flex;
+  flex-direction: column;
+  border-left: 3px solid var(--accent);
+  padding: 4px 8px;
+  margin-bottom: 6px;
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.1);
+  font-size: 12px;
+}
+
+.reply-sender {
+  font-weight: 600;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.reply-text {
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+/* Reply bar above input */
+.reply-bar {
+  display: flex;
+  align-items: center;
+  padding: 8px 24px;
+  background: var(--bg-tertiary);
+  border-left: 3px solid var(--accent);
+  margin: 0 24px 8px;
+  border-radius: 8px;
+}
+
+.reply-bar-content { flex: 1; }
+
+.reply-bar-sender {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.reply-bar-text {
+  display: block;
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 300px;
+}
+
+.reply-bar-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.reply-bar-close:hover { color: var(--text-primary); }
+
+/* Download icon in file messages */
+.download-icon {
+  font-size: 18px;
+  color: var(--accent);
+  margin-left: auto;
+}
+
+/* Image Viewer Overlay */
+.image-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  animation: fadeIn 0.15s ease;
+}
+
+.image-viewer {
+  max-width: 90vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.image-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border-radius: 12px 12px 0 0;
+}
+
+.image-viewer-name {
+  font-size: 14px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.image-viewer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.image-viewer-actions button {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.image-viewer-actions button:first-child {
+  background: var(--accent);
+  color: white;
+}
+
+.image-viewer-actions button:first-child:hover { background: var(--accent-hover); }
+
+.image-viewer-actions button:last-child {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 18px;
+  padding: 4px 12px;
+}
+
+.image-viewer-actions button:last-child:hover { background: var(--bg-hover); }
+
+.image-viewer-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-primary);
+  border-radius: 0 0 12px 12px;
+  overflow: hidden;
+}
+
+.image-viewer-body img {
+  max-width: 85vw;
+  max-height: 75vh;
+  object-fit: contain;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

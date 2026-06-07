@@ -53,6 +53,9 @@ async function initDatabase() {
       content TEXT NOT NULL,
       type TEXT DEFAULT 'text',
       is_read INTEGER DEFAULT 0,
+      reply_to_id TEXT DEFAULT NULL,
+      reply_to_content TEXT DEFAULT NULL,
+      reply_to_sender TEXT DEFAULT NULL,
       created_at TEXT NOT NULL
     )
   `);
@@ -165,28 +168,48 @@ function isContact(userId, contactId) {
 }
 
 // --- Messages ---
-function saveMessage(fromUserId, toUserId, content, type) {
+function saveMessage(fromUserId, toUserId, content, type, replyTo) {
   const id = uuidv4();
   const createdAt = new Date().toISOString();
   db.run(
-    `INSERT INTO messages (id, from_user_id, to_user_id, content, type, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [id, fromUserId, toUserId, content, type || 'text', createdAt]
+    `INSERT INTO messages (id, from_user_id, to_user_id, content, type, reply_to_id, reply_to_content, reply_to_sender, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, fromUserId, toUserId, content, type || 'text',
+     replyTo ? replyTo.id : null,
+     replyTo ? replyTo.content : null,
+     replyTo ? replyTo.senderName : null,
+     createdAt]
   );
   saveToFile();
-  return { id, fromUserId, toUserId, content, type: type || 'text', createdAt, is_read: 0 };
+  return {
+    id, fromUserId, toUserId, content, type: type || 'text', createdAt, is_read: 0,
+    replyTo: replyTo ? { id: replyTo.id, content: replyTo.content, senderName: replyTo.senderName } : null
+  };
 }
 
 function getConversation(userId1, userId2, limit = 50) {
   const stmt = db.prepare(
-    `SELECT id, from_user_id as fromUserId, to_user_id as toUserId, content, type, is_read, created_at as createdAt
+    `SELECT id, from_user_id as fromUserId, to_user_id as toUserId, content, type, is_read,
+            reply_to_id, reply_to_content, reply_to_sender,
+            created_at as createdAt
      FROM messages
      WHERE (from_user_id = ? AND to_user_id = ?) OR (from_user_id = ? AND to_user_id = ?)
      ORDER BY created_at DESC LIMIT ?`
   );
   stmt.bind([userId1, userId2, userId2, userId1, limit]);
   const messages = [];
-  while (stmt.step()) messages.push(stmt.getAsObject());
+  while (stmt.step()) {
+    const row = stmt.getAsObject();
+    if (row.reply_to_id) {
+      row.replyTo = { id: row.reply_to_id, content: row.reply_to_content, senderName: row.reply_to_sender };
+    } else {
+      row.replyTo = null;
+    }
+    delete row.reply_to_id;
+    delete row.reply_to_content;
+    delete row.reply_to_sender;
+    messages.push(row);
+  }
   stmt.free();
   return messages.reverse();
 }

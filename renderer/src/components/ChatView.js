@@ -3,19 +3,32 @@ import React, { useState, useRef, useEffect } from 'react';
 function ChatView({ user, activeChat, messages, socket, isTyping, isOnline, onSendMessage, onUploadFile }) {
   const [input, setInput] = useState('');
   const [typing, setTyping] = useState(false);
+  const [replyTo, setReplyTo] = useState(null);
+  const [imageViewer, setImageViewer] = useState(null);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
+  const inputRef = useRef(null);
   const typingTimeout = useRef(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  useEffect(() => {
+    setReplyTo(null);
+  }, [activeChat]);
+
   const handleSend = (e) => {
     e.preventDefault();
     if (!input.trim()) return;
-    onSendMessage(input);
+    const reply = replyTo ? {
+      id: replyTo.id,
+      content: replyTo.type === 'image' || replyTo.type === 'file' ? '[File]' : replyTo.content,
+      senderName: replyTo.fromUserId === user.id ? user.displayName : (activeChat.display_name || activeChat.displayName)
+    } : null;
+    onSendMessage(input, 'text', reply);
     setInput('');
+    setReplyTo(null);
     stopTyping();
   };
 
@@ -37,9 +50,7 @@ function ChatView({ user, activeChat, messages, socket, isTyping, isOnline, onSe
     clearTimeout(typingTimeout.current);
   };
 
-  const handleFileClick = () => {
-    fileInputRef.current?.click();
-  };
+  const handleFileClick = () => fileInputRef.current?.click();
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
@@ -49,8 +60,38 @@ function ChatView({ user, activeChat, messages, socket, isTyping, isOnline, onSe
     }
   };
 
+  const handleReply = (msg) => {
+    setReplyTo(msg);
+    inputRef.current?.focus();
+  };
+
   const formatTime = (iso) => {
     return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const formatFileSize = (bytes) => {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  };
+
+  const downloadFile = (url, filename) => {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || 'download';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const renderReplyPreview = (msg) => {
+    if (!msg.replyTo) return null;
+    return (
+      <div className="reply-preview">
+        <span className="reply-sender">{msg.replyTo.senderName}</span>
+        <span className="reply-text">{msg.replyTo.content}</span>
+      </div>
+    );
   };
 
   const renderMessageContent = (msg) => {
@@ -60,20 +101,25 @@ function ChatView({ user, activeChat, messages, socket, isTyping, isOnline, onSe
         if (msg.type === 'image') {
           return (
             <div className="file-message">
-              <img src={fileData.url} alt={fileData.filename} className="message-image" />
-              <span className="file-name">{fileData.filename}</span>
+              <img
+                src={fileData.url}
+                alt={fileData.filename}
+                className="message-image"
+                onClick={() => setImageViewer(fileData)}
+              />
             </div>
           );
         } else {
           return (
             <div className="file-message">
-              <a href={fileData.url} target="_blank" rel="noopener noreferrer" className="file-download">
+              <div className="file-download" onClick={() => downloadFile(fileData.url, fileData.filename)}>
                 <span className="file-icon">&#x1F4CE;</span>
                 <span className="file-details">
                   <span className="file-name">{fileData.filename}</span>
                   <span className="file-size">{formatFileSize(fileData.size)}</span>
                 </span>
-              </a>
+                <span className="download-icon">&#x2B07;</span>
+              </div>
             </div>
           );
         }
@@ -82,12 +128,6 @@ function ChatView({ user, activeChat, messages, socket, isTyping, isOnline, onSe
       }
     }
     return msg.content;
-  };
-
-  const formatFileSize = (bytes) => {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
   if (!activeChat) {
@@ -129,8 +169,12 @@ function ChatView({ user, activeChat, messages, socket, isTyping, isOnline, onSe
           return (
             <div key={msg.id || idx} className={`message ${isOwn ? 'own' : 'other'}`}>
               <div className="message-bubble">
+                {renderReplyPreview(msg)}
                 {renderMessageContent(msg)}
                 <span className="msg-time">{formatTime(msg.createdAt)}</span>
+                <button className="reply-btn" onClick={() => handleReply(msg)} title="Reply">
+                  &#x21A9;
+                </button>
               </div>
             </div>
           );
@@ -146,6 +190,19 @@ function ChatView({ user, activeChat, messages, socket, isTyping, isOnline, onSe
       </div>
 
       <div className="message-input-area">
+        {replyTo && (
+          <div className="reply-bar">
+            <div className="reply-bar-content">
+              <span className="reply-bar-sender">
+                Replying to {replyTo.fromUserId === user.id ? 'yourself' : (activeChat.display_name || activeChat.displayName)}
+              </span>
+              <span className="reply-bar-text">
+                {replyTo.type === 'image' || replyTo.type === 'file' ? '[File]' : replyTo.content}
+              </span>
+            </div>
+            <button className="reply-bar-close" onClick={() => setReplyTo(null)}>&times;</button>
+          </div>
+        )}
         <form className="input-form" onSubmit={handleSend}>
           <button type="button" className="attach-btn" onClick={handleFileClick} title="Send file">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
@@ -157,9 +214,9 @@ function ChatView({ user, activeChat, messages, socket, isTyping, isOnline, onSe
             type="file"
             style={{ display: 'none' }}
             onChange={handleFileChange}
-            accept="image/*,.pdf,.doc,.docx,.txt,.zip,.rar"
           />
           <input
+            ref={inputRef}
             className="message-input"
             type="text"
             placeholder={`Message ${activeChat.display_name || activeChat.displayName}...`}
@@ -174,6 +231,28 @@ function ChatView({ user, activeChat, messages, socket, isTyping, isOnline, onSe
           </button>
         </form>
       </div>
+
+      {/* Image Viewer Overlay */}
+      {imageViewer && (
+        <div className="image-viewer-overlay" onClick={() => setImageViewer(null)}>
+          <div className="image-viewer" onClick={e => e.stopPropagation()}>
+            <div className="image-viewer-header">
+              <span className="image-viewer-name">{imageViewer.filename}</span>
+              <div className="image-viewer-actions">
+                <button onClick={() => downloadFile(imageViewer.url, imageViewer.filename)} title="Download">
+                  &#x2B07; Download
+                </button>
+                <button onClick={() => setImageViewer(null)} title="Close">
+                  &times;
+                </button>
+              </div>
+            </div>
+            <div className="image-viewer-body">
+              <img src={imageViewer.url} alt={imageViewer.filename} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -78,6 +78,13 @@ async function startServer(port) {
       if (userId === contactId) return res.status(400).json({ error: 'Cannot add yourself' });
       const success = db.addContact(userId, contactId);
       if (!success) return res.status(409).json({ error: 'Already a contact' });
+
+      // Notify both users via socket to refresh contacts
+      const adderSocket = onlineUsers.get(userId);
+      const addedSocket = onlineUsers.get(contactId);
+      if (adderSocket) io.to(adderSocket).emit('contacts:updated');
+      if (addedSocket) io.to(addedSocket).emit('contacts:updated');
+
       res.json({ success: true });
     });
 
@@ -105,7 +112,7 @@ async function startServer(port) {
         cb(null, `${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ext}`);
       }
     });
-    const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB
+    const upload = multer({ storage }); // No file size limit
 
     app.use('/uploads', express.static(uploadsDir));
 
@@ -165,9 +172,9 @@ async function startServer(port) {
       });
 
       // Private message
-      socket.on('message:send', ({ toUserId, content, type }) => {
+      socket.on('message:send', ({ toUserId, content, type, replyTo }) => {
         if (!socket.userId) return;
-        const message = db.saveMessage(socket.userId, toUserId, content, type);
+        const message = db.saveMessage(socket.userId, toUserId, content, type, replyTo || null);
         // Send to recipient if online
         const recipientSocket = onlineUsers.get(toUserId);
         if (recipientSocket) {
