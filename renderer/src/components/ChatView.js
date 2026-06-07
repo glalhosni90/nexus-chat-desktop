@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 
-function ChatView({ user, activeChat, messages, socket, isTyping, isOnline, onSendMessage }) {
+function ChatView({ user, activeChat, messages, socket, isTyping, isOnline, onSendMessage, onUploadFile }) {
   const [input, setInput] = useState('');
   const [typing, setTyping] = useState(false);
   const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
   const typingTimeout = useRef(null);
 
   useEffect(() => {
@@ -36,8 +37,57 @@ function ChatView({ user, activeChat, messages, socket, isTyping, isOnline, onSe
     clearTimeout(typingTimeout.current);
   };
 
+  const handleFileClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      onUploadFile(file);
+      e.target.value = '';
+    }
+  };
+
   const formatTime = (iso) => {
     return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const renderMessageContent = (msg) => {
+    if (msg.type === 'image' || msg.type === 'file') {
+      try {
+        const fileData = JSON.parse(msg.content);
+        if (msg.type === 'image') {
+          return (
+            <div className="file-message">
+              <img src={fileData.url} alt={fileData.filename} className="message-image" />
+              <span className="file-name">{fileData.filename}</span>
+            </div>
+          );
+        } else {
+          return (
+            <div className="file-message">
+              <a href={fileData.url} target="_blank" rel="noopener noreferrer" className="file-download">
+                <span className="file-icon">&#x1F4CE;</span>
+                <span className="file-details">
+                  <span className="file-name">{fileData.filename}</span>
+                  <span className="file-size">{formatFileSize(fileData.size)}</span>
+                </span>
+              </a>
+            </div>
+          );
+        }
+      } catch {
+        return msg.content;
+      }
+    }
+    return msg.content;
+  };
+
+  const formatFileSize = (bytes) => {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
   if (!activeChat) {
@@ -62,7 +112,7 @@ function ChatView({ user, activeChat, messages, socket, isTyping, isOnline, onSe
         <div className="chat-header-info">
           <h3>{activeChat.display_name || activeChat.displayName}</h3>
           <span className={`status ${isOnline ? 'online' : ''}`}>
-            {isOnline ? 'Online' : 'Offline'}
+            {isTyping ? 'Typing...' : (isOnline ? 'Online' : 'Offline')}
           </span>
         </div>
       </div>
@@ -75,12 +125,11 @@ function ChatView({ user, activeChat, messages, socket, isTyping, isOnline, onSe
         )}
         {messages.map((msg, idx) => {
           const isOwn = msg.fromUserId === user.id;
-          const showTime = idx === 0 || messages[idx - 1].fromUserId !== msg.fromUserId;
 
           return (
             <div key={msg.id || idx} className={`message ${isOwn ? 'own' : 'other'}`}>
               <div className="message-bubble">
-                {msg.content}
+                {renderMessageContent(msg)}
                 <span className="msg-time">{formatTime(msg.createdAt)}</span>
               </div>
             </div>
@@ -98,6 +147,18 @@ function ChatView({ user, activeChat, messages, socket, isTyping, isOnline, onSe
 
       <div className="message-input-area">
         <form className="input-form" onSubmit={handleSend}>
+          <button type="button" className="attach-btn" onClick={handleFileClick} title="Send file">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+              <path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/>
+            </svg>
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            style={{ display: 'none' }}
+            onChange={handleFileChange}
+            accept="image/*,.pdf,.doc,.docx,.txt,.zip,.rar"
+          />
           <input
             className="message-input"
             type="text"

@@ -22,6 +22,17 @@ function App() {
   const [typingUsers, setTypingUsers] = useState({});
   const [showSearch, setShowSearch] = useState(false);
 
+  // Use ref to track activeChat in socket handlers (avoid stale closure)
+  const activeChatRef = useRef(null);
+  useEffect(() => {
+    activeChatRef.current = activeChat;
+  }, [activeChat]);
+
+  const userRef = useRef(null);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
   // Connect socket when user logs in
   useEffect(() => {
     if (!user) return;
@@ -33,17 +44,21 @@ function App() {
     });
 
     newSocket.on('message:receive', (msg) => {
-      setMessages(prev => {
-        if (prev.length > 0 && (prev[0].fromUserId === msg.fromUserId || prev[0].toUserId === msg.fromUserId)) {
-          return [...prev, msg];
-        }
-        return prev;
-      });
-      setUnreadCounts(prev => ({
-        ...prev,
-        [msg.fromUserId]: (prev[msg.fromUserId] || 0) + 1
-      }));
-      loadContacts();
+      const currentChat = activeChatRef.current;
+      // If we're in the conversation with the sender, add message to view
+      if (currentChat && currentChat.id === msg.fromUserId) {
+        setMessages(prev => [...prev, msg]);
+        // Mark as read since we're viewing
+        newSocket.emit('messages:read', { fromUserId: msg.fromUserId });
+      } else {
+        // Not in this chat, increment unread
+        setUnreadCounts(prev => ({
+          ...prev,
+          [msg.fromUserId]: (prev[msg.fromUserId] || 0) + 1
+        }));
+      }
+      // Refresh contacts to update order
+      loadContactsFn(userRef.current);
     });
 
     newSocket.on('message:sent', (msg) => {
@@ -62,46 +77,50 @@ function App() {
       setTypingUsers(prev => ({ ...prev, [fromUserId]: false }));
     });
 
-    newSocket.on('messages:read', ({ byUserId }) => {
-      // Messages were read by the other user
-    });
+    newSocket.on('messages:read', ({ byUserId }) => {});
 
     setSocket(newSocket);
-    loadContacts();
-    loadUnread();
+    loadContactsFn(user);
+    loadUnreadFn(user);
 
     return () => {
       newSocket.disconnect();
     };
   }, [user]);
 
-  const loadContacts = useCallback(async () => {
-    if (!user) return;
-    const res = await fetch(`${SERVER_URL}/api/contacts/${user.id}`);
-    const data = await res.json();
-    setContacts(data);
-  }, [user]);
+  const loadContactsFn = async (u) => {
+    if (!u) return;
+    try {
+      const res = await fetch(`${SERVER_URL}/api/contacts/${u.id}`);
+      const data = await res.json();
+      setContacts(data);
+    } catch {}
+  };
 
-  const loadUnread = useCallback(async () => {
-    if (!user) return;
-    const res = await fetch(`${SERVER_URL}/api/messages/unread/${user.id}`);
-    const data = await res.json();
-    setUnreadCounts(data);
-  }, [user]);
+  const loadUnreadFn = async (u) => {
+    if (!u) return;
+    try {
+      const res = await fetch(`${SERVER_URL}/api/messages/unread/${u.id}`);
+      const data = await res.json();
+      setUnreadCounts(data);
+    } catch {}
+  };
+
+  const loadContacts = () => loadContactsFn(user);
+  const loadUnread = () => loadUnreadFn(user);
 
   const openChat = async (contact) => {
     setActiveChat(contact);
     const res = await fetch(`${SERVER_URL}/api/messages/${user.id}/${contact.id}`);
     const data = await res.json();
     setMessages(data);
-    // Clear unread for this contact
     setUnreadCounts(prev => ({ ...prev, [contact.id]: 0 }));
     if (socket) socket.emit('messages:read', { fromUserId: contact.id });
   };
 
-  const sendMessage = (content) => {
+  const sendMessage = (content, type = 'text') => {
     if (!socket || !activeChat || !content.trim()) return;
-    socket.emit('message:send', { toUserId: activeChat.id, content, type: 'text' });
+    socket.emit('message:send', { toUserId: activeChat.id, content, type });
   };
 
   const handleLogin = (userData) => {
@@ -129,6 +148,25 @@ function App() {
     setShowSearch(false);
   };
 
+  const handleUploadFile = async (file) => {
+    if (!file || !activeChat) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('fromUserId', user.id);
+    formData.append('toUserId', activeChat.id);
+
+    try {
+      const res = await fetch(`${SERVER_URL}/api/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      // Message is broadcast via socket from server
+    } catch (err) {
+      console.error('Upload failed:', err);
+    }
+  };
+
   if (!user) {
     return <AuthScreen onLogin={handleLogin} serverUrl={SERVER_URL} />;
   }
@@ -153,6 +191,7 @@ function App() {
         isTyping={activeChat ? typingUsers[activeChat.id] : false}
         isOnline={activeChat ? onlineStatuses[activeChat.id] === 'online' : false}
         onSendMessage={sendMessage}
+        onUploadFile={handleUploadFile}
       />
       {showSearch && (
         <SearchModal

@@ -3,7 +3,9 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
+const multer = require('multer');
 const db = require('./database');
 
 let server = null;
@@ -90,6 +92,51 @@ async function startServer(port) {
     app.get('/api/messages/unread/:userId', (req, res) => {
       const counts = db.getUnreadCounts(req.params.userId);
       res.json(counts);
+    });
+
+    // --- FILE UPLOAD ---
+    const uploadsDir = path.join(__dirname, '..', 'uploads');
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+    const storage = multer.diskStorage({
+      destination: uploadsDir,
+      filename: (req, file, cb) => {
+        const ext = path.extname(file.originalname);
+        cb(null, `${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ext}`);
+      }
+    });
+    const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB
+
+    app.use('/uploads', express.static(uploadsDir));
+
+    app.post('/api/upload', upload.single('file'), (req, res) => {
+      if (!req.file) return res.status(400).json({ error: 'No file' });
+      const { fromUserId, toUserId } = req.body;
+      if (!fromUserId || !toUserId) return res.status(400).json({ error: 'Missing user IDs' });
+
+      const fileUrl = `/uploads/${req.file.filename}`;
+      const isImage = req.file.mimetype.startsWith('image/');
+      const content = JSON.stringify({
+        url: fileUrl,
+        filename: req.file.originalname,
+        size: req.file.size,
+        mimetype: req.file.mimetype,
+      });
+
+      const message = db.saveMessage(fromUserId, toUserId, content, isImage ? 'image' : 'file');
+
+      // Send via socket to recipient
+      const recipientSocket = onlineUsers.get(toUserId);
+      if (recipientSocket) {
+        io.to(recipientSocket).emit('message:receive', message);
+      }
+      // Send back to sender
+      const senderSocket = onlineUsers.get(fromUserId);
+      if (senderSocket) {
+        io.to(senderSocket).emit('message:sent', message);
+      }
+
+      res.json(message);
     });
 
     // Health

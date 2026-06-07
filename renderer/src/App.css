@@ -697,6 +697,63 @@ body {
   font-weight: 500;
 }
 
+/* Attach button */
+.attach-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.attach-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-light);
+}
+
+/* File messages */
+.file-message {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.message-image {
+  max-width: 280px;
+  max-height: 200px;
+  border-radius: 12px;
+  object-fit: cover;
+  cursor: pointer;
+}
+
+.message-image:hover { opacity: 0.9; }
+
+.file-download {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 8px;
+  text-decoration: none;
+  color: inherit;
+  transition: background 0.2s;
+}
+
+.file-download:hover { background: rgba(255,255,255,0.1); }
+.file-icon { font-size: 24px; }
+.file-details { display: flex; flex-direction: column; }
+.file-name { font-size: 13px; font-weight: 500; }
+.file-size { font-size: 11px; color: var(--text-muted); }
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

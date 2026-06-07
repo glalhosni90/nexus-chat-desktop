@@ -3,5 +3,6 @@ dist/
 renderer/build/
 renderer/node_modules/
 nexuschat.db
+uploads/
 *.exe
 .env
