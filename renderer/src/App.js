@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import AuthScreen from './components/AuthScreen';
 import Sidebar from './components/Sidebar';
 import ChatView from './components/ChatView';
 import SearchModal from './components/SearchModal';
+import CallModal from './components/CallModal';
+import ProfileModal from './components/ProfileModal';
 import './App.css';
 
 const SERVER_URL = window.location.origin;
@@ -21,17 +23,32 @@ function App() {
   const [onlineStatuses, setOnlineStatuses] = useState({});
   const [typingUsers, setTypingUsers] = useState({});
   const [showSearch, setShowSearch] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [callState, setCallState] = useState(null);
 
-  // Use ref to track activeChat in socket handlers (avoid stale closure)
   const activeChatRef = useRef(null);
-  useEffect(() => {
-    activeChatRef.current = activeChat;
-  }, [activeChat]);
+  useEffect(() => { activeChatRef.current = activeChat; }, [activeChat]);
 
   const userRef = useRef(null);
+  useEffect(() => { userRef.current = user; }, [user]);
+
+  // Verify saved user on mount
   useEffect(() => {
-    userRef.current = user;
-  }, [user]);
+    if (user) {
+      fetch(`${SERVER_URL}/api/verify/${user.id}`)
+        .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+        .then(data => {
+          const updated = { ...user, ...data.user, displayName: data.user.displayName || data.user.display_name };
+          localStorage.setItem('nexuschat_user', JSON.stringify(updated));
+          setUser(updated);
+        })
+        .catch(() => {
+          // User no longer exists in DB, clear
+          localStorage.removeItem('nexuschat_user');
+          setUser(null);
+        });
+    }
+  }, []);
 
   // Connect socket when user logs in
   useEffect(() => {
@@ -45,19 +62,15 @@ function App() {
 
     newSocket.on('message:receive', (msg) => {
       const currentChat = activeChatRef.current;
-      // If we're in the conversation with the sender, add message to view
       if (currentChat && currentChat.id === msg.fromUserId) {
         setMessages(prev => [...prev, msg]);
-        // Mark as read since we're viewing
         newSocket.emit('messages:read', { fromUserId: msg.fromUserId });
       } else {
-        // Not in this chat, increment unread
         setUnreadCounts(prev => ({
           ...prev,
           [msg.fromUserId]: (prev[msg.fromUserId] || 0) + 1
         }));
       }
-      // Refresh contacts to update order
       loadContactsFn(userRef.current);
     });
 
@@ -77,19 +90,26 @@ function App() {
       setTypingUsers(prev => ({ ...prev, [fromUserId]: false }));
     });
 
-    newSocket.on('messages:read', ({ byUserId }) => {});
+    newSocket.on('messages:read', () => {});
 
     newSocket.on('contacts:updated', () => {
       loadContactsFn(userRef.current);
+    });
+
+    // Call events
+    newSocket.on('call:incoming', ({ fromUserId, callType }) => {
+      setCallState({ type: 'incoming', peerId: fromUserId, callType });
+    });
+
+    newSocket.on('call:unavailable', () => {
+      setCallState(null);
     });
 
     setSocket(newSocket);
     loadContactsFn(user);
     loadUnreadFn(user);
 
-    return () => {
-      newSocket.disconnect();
-    };
+    return () => { newSocket.disconnect(); };
   }, [user]);
 
   const loadContactsFn = async (u) => {
@@ -109,9 +129,6 @@ function App() {
       setUnreadCounts(data);
     } catch {}
   };
-
-  const loadContacts = () => loadContactsFn(user);
-  const loadUnread = () => loadUnreadFn(user);
 
   const openChat = async (contact) => {
     setActiveChat(contact);
@@ -148,7 +165,6 @@ function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId: user.id, contactId })
     });
-    loadContacts();
     setShowSearch(false);
   };
 
@@ -158,17 +174,21 @@ function App() {
     formData.append('file', file);
     formData.append('fromUserId', user.id);
     formData.append('toUserId', activeChat.id);
-
     try {
-      const res = await fetch(`${SERVER_URL}/api/upload`, {
-        method: 'POST',
-        body: formData,
-      });
-      const data = await res.json();
-      // Message is broadcast via socket from server
+      await fetch(`${SERVER_URL}/api/upload`, { method: 'POST', body: formData });
     } catch (err) {
       console.error('Upload failed:', err);
     }
+  };
+
+  const handleCall = (callType) => {
+    if (!activeChat) return;
+    setCallState({ type: 'outgoing', peerId: activeChat.id, callType });
+  };
+
+  const handleProfileUpdate = (updatedUser) => {
+    localStorage.setItem('nexuschat_user', JSON.stringify(updatedUser));
+    setUser(updatedUser);
   };
 
   if (!user) {
@@ -185,6 +205,7 @@ function App() {
         onlineStatuses={onlineStatuses}
         onSelectChat={openChat}
         onShowSearch={() => setShowSearch(true)}
+        onShowProfile={() => setShowProfile(true)}
         onLogout={handleLogout}
       />
       <ChatView
@@ -196,6 +217,7 @@ function App() {
         isOnline={activeChat ? onlineStatuses[activeChat.id] === 'online' : false}
         onSendMessage={sendMessage}
         onUploadFile={handleUploadFile}
+        onCall={handleCall}
       />
       {showSearch && (
         <SearchModal
@@ -204,6 +226,23 @@ function App() {
           contacts={contacts}
           onAdd={handleAddContact}
           onClose={() => setShowSearch(false)}
+        />
+      )}
+      {showProfile && (
+        <ProfileModal
+          user={user}
+          serverUrl={SERVER_URL}
+          onUpdate={handleProfileUpdate}
+          onClose={() => setShowProfile(false)}
+        />
+      )}
+      {callState && (
+        <CallModal
+          user={user}
+          activeChat={activeChat}
+          socket={socket}
+          callState={callState}
+          onClose={() => setCallState(null)}
         />
       )}
     </div>

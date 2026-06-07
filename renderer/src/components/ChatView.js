@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 
-function ChatView({ user, activeChat, messages, socket, isTyping, isOnline, onSendMessage, onUploadFile }) {
+function ChatView({ user, activeChat, messages, socket, isTyping, isOnline, onSendMessage, onUploadFile, onCall }) {
   const [input, setInput] = useState('');
   const [typing, setTyping] = useState(false);
   const [replyTo, setReplyTo] = useState(null);
@@ -154,6 +154,14 @@ function ChatView({ user, activeChat, messages, socket, isTyping, isOnline, onSe
           <span className={`status ${isOnline ? 'online' : ''}`}>
             {isTyping ? 'Typing...' : (isOnline ? 'Online' : 'Offline')}
           </span>
+        </div>
+        <div className="chat-header-actions">
+          <button className="header-action-btn" onClick={() => onCall('audio')} title="Voice Call">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>
+          </button>
+          <button className="header-action-btn" onClick={() => onCall('video')} title="Video Call">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+          </button>
         </div>
       </div>
 

@@ -30,6 +30,19 @@ async function startServer(port) {
     const buildPath = path.join(__dirname, '..', 'renderer', 'build');
     app.use(express.static(buildPath));
 
+    // --- FILE UPLOAD SETUP ---
+    const uploadsDir = path.join(__dirname, '..', 'uploads');
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+    const storage = multer.diskStorage({
+      destination: uploadsDir,
+      filename: (req, file, cb) => {
+        const ext = path.extname(file.originalname);
+        cb(null, `${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ext}`);
+      }
+    });
+    const upload = multer({ storage });
+    app.use('/uploads', express.static(uploadsDir));
+
     // --- AUTH ---
     app.post('/api/register', (req, res) => {
       const { username, displayName, password, avatarColor } = req.body;
@@ -56,6 +69,32 @@ async function startServer(port) {
       res.json({
         user: { id: user.id, username: user.username, displayName: user.display_name, avatarColor: user.avatar_color }
       });
+    });
+
+    // Verify user session
+    app.get('/api/verify/:userId', (req, res) => {
+      const user = db.getUserById(req.params.userId);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      res.json({ user: { id: user.id, username: user.username, displayName: user.display_name, avatarColor: user.avatar_color, avatar: user.avatar } });
+    });
+
+    // Update profile
+    app.post('/api/profile/update', (req, res) => {
+      const { userId, displayName, avatarColor } = req.body;
+      if (!userId) return res.status(400).json({ error: 'Missing userId' });
+      const updated = db.updateProfile(userId, { displayName, avatarColor });
+      if (!updated) return res.status(404).json({ error: 'User not found' });
+      res.json({ user: updated });
+    });
+
+    // Upload avatar
+    app.post('/api/profile/avatar', upload.single('avatar'), (req, res) => {
+      if (!req.file) return res.status(400).json({ error: 'No file' });
+      const { userId } = req.body;
+      if (!userId) return res.status(400).json({ error: 'Missing userId' });
+      const avatarUrl = `/uploads/${req.file.filename}`;
+      db.updateAvatar(userId, avatarUrl);
+      res.json({ avatarUrl });
     });
 
     // --- USERS ---
@@ -101,20 +140,7 @@ async function startServer(port) {
       res.json(counts);
     });
 
-    // --- FILE UPLOAD ---
-    const uploadsDir = path.join(__dirname, '..', 'uploads');
-    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-
-    const storage = multer.diskStorage({
-      destination: uploadsDir,
-      filename: (req, file, cb) => {
-        const ext = path.extname(file.originalname);
-        cb(null, `${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ext}`);
-      }
-    });
-    const upload = multer({ storage }); // No file size limit
-
-    app.use('/uploads', express.static(uploadsDir));
+    // --- FILE UPLOAD ENDPOINT ---
 
     app.post('/api/upload', upload.single('file'), (req, res) => {
       if (!req.file) return res.status(400).json({ error: 'No file' });
@@ -207,6 +233,49 @@ async function startServer(port) {
         if (senderSocket) {
           io.to(senderSocket).emit('messages:read', { byUserId: socket.userId });
         }
+      });
+
+      // --- WebRTC Signaling ---
+      socket.on('call:initiate', ({ toUserId, callType }) => {
+        const recipientSocket = onlineUsers.get(toUserId);
+        if (recipientSocket) {
+          io.to(recipientSocket).emit('call:incoming', {
+            fromUserId: socket.userId,
+            callType // 'audio' or 'video'
+          });
+        } else {
+          socket.emit('call:unavailable', { toUserId });
+        }
+      });
+
+      socket.on('call:accept', ({ toUserId }) => {
+        const callerSocket = onlineUsers.get(toUserId);
+        if (callerSocket) io.to(callerSocket).emit('call:accepted', { fromUserId: socket.userId });
+      });
+
+      socket.on('call:reject', ({ toUserId }) => {
+        const callerSocket = onlineUsers.get(toUserId);
+        if (callerSocket) io.to(callerSocket).emit('call:rejected', { fromUserId: socket.userId });
+      });
+
+      socket.on('call:end', ({ toUserId }) => {
+        const otherSocket = onlineUsers.get(toUserId);
+        if (otherSocket) io.to(otherSocket).emit('call:ended', { fromUserId: socket.userId });
+      });
+
+      socket.on('webrtc:offer', ({ toUserId, offer }) => {
+        const recipientSocket = onlineUsers.get(toUserId);
+        if (recipientSocket) io.to(recipientSocket).emit('webrtc:offer', { fromUserId: socket.userId, offer });
+      });
+
+      socket.on('webrtc:answer', ({ toUserId, answer }) => {
+        const recipientSocket = onlineUsers.get(toUserId);
+        if (recipientSocket) io.to(recipientSocket).emit('webrtc:answer', { fromUserId: socket.userId, answer });
+      });
+
+      socket.on('webrtc:ice-candidate', ({ toUserId, candidate }) => {
+        const recipientSocket = onlineUsers.get(toUserId);
+        if (recipientSocket) io.to(recipientSocket).emit('webrtc:ice-candidate', { fromUserId: socket.userId, candidate });
       });
 
       // Disconnect

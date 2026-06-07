@@ -30,6 +30,8 @@ async function initDatabase() {
       display_name TEXT NOT NULL,
       password TEXT NOT NULL,
       avatar_color TEXT DEFAULT '#6366f1',
+      avatar TEXT DEFAULT NULL,
+      bio TEXT DEFAULT '',
       status TEXT DEFAULT 'offline',
       created_at TEXT NOT NULL
     )
@@ -98,12 +100,29 @@ function getUserByUsername(username) {
 }
 
 function getUserById(id) {
-  const stmt = db.prepare('SELECT id, username, display_name, avatar_color, status, created_at FROM users WHERE id = ?');
+  const stmt = db.prepare('SELECT id, username, display_name, avatar_color, avatar, bio, status, created_at FROM users WHERE id = ?');
   stmt.bind([id]);
   let user = null;
   if (stmt.step()) user = stmt.getAsObject();
   stmt.free();
   return user;
+}
+
+function updateProfile(userId, { displayName, avatarColor }) {
+  const sets = [];
+  const vals = [];
+  if (displayName) { sets.push('display_name = ?'); vals.push(displayName); }
+  if (avatarColor) { sets.push('avatar_color = ?'); vals.push(avatarColor); }
+  if (sets.length === 0) return null;
+  vals.push(userId);
+  db.run(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, vals);
+  saveToFile();
+  return getUserById(userId);
+}
+
+function updateAvatar(userId, avatarUrl) {
+  db.run('UPDATE users SET avatar = ? WHERE id = ?', [avatarUrl, userId]);
+  saveToFile();
 }
 
 function searchUsers(query) {
@@ -147,7 +166,7 @@ function addContact(userId, contactId) {
 
 function getContacts(userId) {
   const stmt = db.prepare(
-    `SELECT u.id, u.username, u.display_name, u.avatar_color, u.status
+    `SELECT u.id, u.username, u.display_name, u.avatar_color, u.avatar, u.status
      FROM contacts c JOIN users u ON c.contact_id = u.id
      WHERE c.user_id = ?
      ORDER BY u.display_name`
@@ -272,6 +291,7 @@ function close() {
 module.exports = {
   initDatabase, close,
   createUser, getUserByUsername, getUserById, searchUsers, updateUserStatus,
+  updateProfile, updateAvatar,
   addContact, getContacts, isContact,
   saveMessage, getConversation, markAsRead, getUnreadCounts, getLastMessages
 };
