@@ -11,6 +11,7 @@ function CallModal({ user, activeChat, socket, callState, onClose }) {
   const pcRef = useRef(null);
   const localStreamRef = useRef(null);
   const timerRef = useRef(null);
+  const audioContextRef = useRef(null);
 
   const isVideo = callState.callType === 'video';
   const peerId = callState.peerId;
@@ -87,9 +88,12 @@ function CallModal({ user, activeChat, socket, callState, onClose }) {
 
   const getMediaStream = async () => {
     const audioConstraints = {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true
+      echoCancellation: { ideal: true },
+      noiseSuppression: { ideal: true },
+      autoGainControl: { ideal: true },
+      channelCount: 1,
+      sampleRate: { ideal: 48000 },
+      latency: { ideal: 0.01 }
     };
     // Try with requested media first
     try {
@@ -180,6 +184,33 @@ function CallModal({ user, activeChat, socket, callState, onClose }) {
     setCallStatus('connected');
   };
 
+  const processRemoteAudio = (stream) => {
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      audioContextRef.current = audioCtx;
+      const source = audioCtx.createMediaStreamSource(stream);
+
+      // Dynamics compressor to prevent loud spikes that cause echo
+      const compressor = audioCtx.createDynamicsCompressor();
+      compressor.threshold.setValueAtTime(-20, audioCtx.currentTime);
+      compressor.knee.setValueAtTime(10, audioCtx.currentTime);
+      compressor.ratio.setValueAtTime(4, audioCtx.currentTime);
+      compressor.attack.setValueAtTime(0.003, audioCtx.currentTime);
+      compressor.release.setValueAtTime(0.1, audioCtx.currentTime);
+
+      // Gain node to reduce volume slightly (prevents speaker-to-mic feedback)
+      const gainNode = audioCtx.createGain();
+      gainNode.gain.setValueAtTime(0.75, audioCtx.currentTime);
+
+      source.connect(compressor);
+      compressor.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+    } catch {
+      // Fallback: just play directly
+      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = stream;
+    }
+  };
+
   const createPeerConnection = () => {
     const pc = new RTCPeerConnection(ICE_SERVERS);
     pcRef.current = pc;
@@ -189,7 +220,15 @@ function CallModal({ user, activeChat, socket, callState, onClose }) {
     }
 
     pc.ontrack = (event) => {
-      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = event.streams[0];
+      const stream = event.streams[0];
+      if (isVideo && remoteVideoRef.current) {
+        // For video: set stream on video element but process audio separately
+        remoteVideoRef.current.srcObject = stream;
+        remoteVideoRef.current.volume = 0.75;
+      } else {
+        // For audio-only: route through WebAudio for echo reduction
+        processRemoteAudio(stream);
+      }
     };
 
     pc.onicecandidate = (event) => {
@@ -218,6 +257,10 @@ function CallModal({ user, activeChat, socket, callState, onClose }) {
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(t => t.stop());
       localStreamRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
     }
   };
 
