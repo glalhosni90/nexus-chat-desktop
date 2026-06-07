@@ -62,6 +62,13 @@ async function initDatabase() {
     )
   `);
 
+  // Migrations: add columns if they don't exist (for existing DBs)
+  try { db.run('ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT NULL'); } catch {}
+  try { db.run('ALTER TABLE users ADD COLUMN bio TEXT DEFAULT ""'); } catch {}
+  try { db.run('ALTER TABLE messages ADD COLUMN reply_to_id TEXT DEFAULT NULL'); } catch {}
+  try { db.run('ALTER TABLE messages ADD COLUMN reply_to_content TEXT DEFAULT NULL'); } catch {}
+  try { db.run('ALTER TABLE messages ADD COLUMN reply_to_sender TEXT DEFAULT NULL'); } catch {}
+
   saveToFile();
   return db;
 }
