@@ -1067,6 +1067,7 @@ body {
 
 .call-info h3 { font-size: 20px; margin-bottom: 4px; }
 .call-status-text { color: var(--text-muted); font-size: 14px; }
+.call-error-hint { color: var(--text-muted); font-size: 12px; margin-top: 8px; opacity: 0.8; }
 
 .call-actions {
   display: flex;

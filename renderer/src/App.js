@@ -96,6 +96,31 @@ function App() {
       loadContactsFn(userRef.current);
     });
 
+    newSocket.on('user:profile-updated', ({ userId, displayName, avatarColor, avatar }) => {
+      // Update contacts list with new profile info
+      setContacts(prev => prev.map(c => {
+        if (c.id === userId) {
+          const updated = { ...c };
+          if (displayName) updated.display_name = displayName;
+          if (avatarColor) updated.avatar_color = avatarColor;
+          if (avatar) updated.avatar = avatar;
+          return updated;
+        }
+        return c;
+      }));
+      // Update active chat if it's the same user
+      const currentChat = activeChatRef.current;
+      if (currentChat && currentChat.id === userId) {
+        setActiveChat(prev => {
+          const updated = { ...prev };
+          if (displayName) updated.display_name = displayName;
+          if (avatarColor) updated.avatar_color = avatarColor;
+          if (avatar) updated.avatar = avatar;
+          return updated;
+        });
+      }
+    });
+
     // Call events
     newSocket.on('call:incoming', ({ fromUserId, callType }) => {
       setCallState({ type: 'incoming', peerId: fromUserId, callType });

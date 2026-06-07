@@ -5,6 +5,7 @@ const ICE_SERVERS = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { u
 function CallModal({ user, activeChat, socket, callState, onClose }) {
   const [callStatus, setCallStatus] = useState(callState.type === 'incoming' ? 'ringing' : 'calling');
   const [callDuration, setCallDuration] = useState(0);
+  const [errorMsg, setErrorMsg] = useState('');
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const pcRef = useRef(null);
@@ -84,34 +85,65 @@ function CallModal({ user, activeChat, socket, callState, onClose }) {
     };
   }, [socket, peerId]);
 
-  const initiateCall = async () => {
+  const getMediaStream = async () => {
+    // Try with requested media first
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
         video: isVideo
       });
+      return stream;
+    } catch (err) {
+      // If video failed, try audio only as fallback
+      if (isVideo) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          setErrorMsg('Camera unavailable, audio only');
+          return stream;
+        } catch (audioErr) {
+          throw audioErr;
+        }
+      }
+      throw err;
+    }
+  };
+
+  const initiateCall = async () => {
+    try {
+      const stream = await getMediaStream();
       localStreamRef.current = stream;
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
       socket.emit('call:initiate', { toUserId: peerId, callType: callState.callType });
     } catch (err) {
+      if (err.name === 'NotAllowedError') {
+        setErrorMsg('Please allow microphone/camera access in browser settings');
+      } else if (err.name === 'NotFoundError') {
+        setErrorMsg('No microphone or camera found');
+      } else {
+        setErrorMsg('Could not access media devices. Check browser permissions.');
+      }
       setCallStatus('error');
-      setTimeout(onClose, 2000);
+      setTimeout(onClose, 4000);
     }
   };
 
   const acceptCall = async () => {
     setCallStatus('connecting');
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: isVideo
-      });
+      const stream = await getMediaStream();
       localStreamRef.current = stream;
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
       socket.emit('call:accept', { toUserId: peerId });
     } catch (err) {
+      if (err.name === 'NotAllowedError') {
+        setErrorMsg('Please allow microphone/camera access in browser settings');
+      } else if (err.name === 'NotFoundError') {
+        setErrorMsg('No microphone or camera found');
+      } else {
+        setErrorMsg('Could not access media devices. Check browser permissions.');
+      }
       setCallStatus('error');
-      setTimeout(onClose, 2000);
+      setTimeout(onClose, 4000);
     }
   };
 
@@ -220,8 +252,11 @@ function CallModal({ user, activeChat, socket, callState, onClose }) {
             {callStatus === 'connected' && formatDuration(callDuration)}
             {callStatus === 'rejected' && 'Call rejected'}
             {callStatus === 'ended' && 'Call ended'}
-            {callStatus === 'error' && 'Failed to access media'}
+            {callStatus === 'error' && (errorMsg || 'Failed to access media')}
           </span>
+          {errorMsg && callStatus === 'error' && (
+            <p className="call-error-hint">Click the camera/microphone icon in the address bar to allow access</p>
+          )}
         </div>
 
         <div className="call-actions">

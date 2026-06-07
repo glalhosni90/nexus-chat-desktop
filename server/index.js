@@ -84,6 +84,8 @@ async function startServer(port) {
       if (!userId) return res.status(400).json({ error: 'Missing userId' });
       const updated = db.updateProfile(userId, { displayName, avatarColor });
       if (!updated) return res.status(404).json({ error: 'User not found' });
+      // Broadcast profile update to all connected users
+      io.emit('user:profile-updated', { userId, displayName, avatarColor });
       res.json({ user: updated });
     });
 
@@ -94,6 +96,8 @@ async function startServer(port) {
       if (!userId) return res.status(400).json({ error: 'Missing userId' });
       const avatarUrl = `/uploads/${req.file.filename}`;
       db.updateAvatar(userId, avatarUrl);
+      // Broadcast avatar update to all connected users
+      io.emit('user:profile-updated', { userId, avatar: avatarUrl });
       res.json({ avatarUrl });
     });
 
